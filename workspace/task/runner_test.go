@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -97,5 +98,59 @@ func TestRunner_Run_Cancel(t *testing.T) {
 	}
 	if err := t1.GetErr(); err != context.Canceled {
 		t.Errorf("expected t1 error to be context.Canceled, got %v", err)
+	}
+}
+
+func TestRunner_Run_DoesNotStartRunningTaskTwice(t *testing.T) {
+	runner := NewRunner()
+
+	var calls atomic.Int32
+	started := make(chan struct{})
+	release := make(chan struct{})
+
+	task := NewTask("1", func(ctx context.Context) error {
+		if calls.Add(1) == 1 {
+			close(started)
+		}
+		<-release
+		return nil
+	})
+	runner.AddTask(task)
+
+	firstDone := make(chan struct{})
+	secondDone := make(chan struct{})
+
+	go func() {
+		runner.Run(context.Background())
+		close(firstDone)
+	}()
+
+	<-started
+
+	go func() {
+		runner.Run(context.Background())
+		close(secondDone)
+	}()
+
+	select {
+	case <-secondDone:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("second Run should skip the already-running task")
+	}
+
+	close(release)
+
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("first Run did not finish")
+	}
+
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("expected task action to run once, got %d", got)
+	}
+
+	if state := task.GetState(); state != StateCompleted {
+		t.Fatalf("expected task to complete, got %s", state)
 	}
 }

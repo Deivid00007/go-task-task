@@ -21,7 +21,7 @@ type Task struct {
 	State      State
 	Action     func(ctx context.Context) error
 	Err        error
-	Metadata   map[string]interface{ }
+	Metadata   map[string]interface{}
 	History    []State
 	StartedAt  time.Time
 	FinishedAt time.Time
@@ -73,6 +73,45 @@ func (t *Task) SetMetadata(key string, val interface{}) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.Metadata[key] = val
+}
+
+func (t *Task) start(ctx context.Context, now time.Time) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.State == StateRunning {
+		return false
+	}
+
+	if err := ctx.Err(); err != nil {
+		t.State = StateFailed
+		t.Err = err
+		t.FinishedAt = now
+		t.History = append(t.History, StateFailed)
+		return false
+	}
+
+	t.State = StateRunning
+	t.StartedAt = now
+	t.History = append(t.History, StateRunning)
+	return true
+}
+
+func (t *Task) finish(err error, now time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.FinishedAt = now
+	if err != nil {
+		t.State = StateFailed
+		t.Err = err
+		t.History = append(t.History, StateFailed)
+		return
+	}
+
+	t.State = StateCompleted
+	t.Err = nil
+	t.History = append(t.History, StateCompleted)
 }
 
 func (t *Task) GetHistory() []State {

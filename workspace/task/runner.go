@@ -35,34 +35,12 @@ func (r *Runner) Run(ctx context.Context) {
 		go func(task *Task) {
 			defer wg.Done()
 
-			if ctx.Err() != nil {
-				task.mu.Lock()
-				task.State = StateFailed
-				task.Err = ctx.Err()
-				task.History = append(task.History, StateFailed)
-				task.mu.Unlock()
+			if !task.start(ctx, time.Now()) {
 				return
 			}
 
-			task.mu.Lock()
-			task.State = StateRunning
-			task.StartedAt = time.Now()
-			task.History = append(task.History, StateRunning)
-			task.mu.Unlock()
-
 			err := task.Action(ctx)
-
-			task.mu.Lock()
-			task.FinishedAt = time.Now()
-			if err != nil {
-				task.State = StateFailed
-				task.Err = err
-				task.History = append(task.History, StateFailed)
-			} else {
-				task.State = StateCompleted
-				task.History = append(task.History, StateCompleted)
-			}
-			task.mu.Unlock()
+			task.finish(err, time.Now())
 		}(t)
 	}
 	wg.Wait()
